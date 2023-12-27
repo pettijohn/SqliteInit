@@ -4,7 +4,19 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <PackageId>SqliteInit</PackageId>
+    <Version>0.9.0</Version>
+    <Authors>Github: pettijohn</Authors>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/pettijohn/SqliteInit</RepositoryUrl>
   </PropertyGroup>
+
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0" />
