@@ -40,7 +40,7 @@ public class SqliteInit
         SortedDictionary<int, string> migrationsFolders;
         try
         {
-            migrationsFolders = IdentifyMigrationsItems(migrationsPath, FileAttributes.Directory);
+            migrationsFolders = IdentifyMigrationsItems(migrationsPath, FilesystemType.Directory);
         }
         catch (Exception ex)
         {
@@ -57,16 +57,16 @@ public class SqliteInit
         connection.Open();
         //Check current user version of database
         var currentVersion = CheckUserVersion(connection);
-        
+
         foreach (var folder in migrationsFolders)
         {
             if (currentVersion >= folder.Key) continue;
-            
+
             //Identify & run sorted upgrade scripts
             SortedDictionary<int, string> migrationFiles;
             try
             {
-                migrationFiles = IdentifyMigrationsItems(folder.Value, FileAttributes.Normal);
+                migrationFiles = IdentifyMigrationsItems(folder.Value, FilesystemType.File);
             }
             catch (Exception ex)
             {
@@ -120,7 +120,7 @@ public class SqliteInit
     {
         var cmd = connection.CreateCommand();
         cmd.CommandText = "PRAGMA user_version;";
-        return (long) cmd.ExecuteScalar()!;
+        return (long)cmd.ExecuteScalar()!;
     }
 
     /// <summary>
@@ -139,30 +139,26 @@ public class SqliteInit
     /// Items that do not parse, e.g., `Beta - 002 - Add indexes.sql` will be skipped. 
     /// </summary>
     /// <param name="migrationsPath">Folder to inspect</param>
-    /// <param name="dirOrNormal">Look at Directory or Normal files - pick one</param>
+    /// <param name="dirOrFile">Look at Directory or Normal files - pick one</param>
     /// <returns>Numerically sorted list of full paths to item</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown if dirOrNormal is neither Directory nor Normal.</exception> 
-    public static SortedDictionary<int, string> IdentifyMigrationsItems(string migrationsPath, FileAttributes dirOrNormal)
+    public static SortedDictionary<int, string> IdentifyMigrationsItems(string migrationsPath, FilesystemType dirOrFile)
     {
         var startsWithNumber = new Regex(@"^(\d+)", RegexOptions.Compiled);
         var sortedMigrations = new SortedDictionary<int, string>();
         // Look at each subfolder, attempt to parse it - it needs to start with a nonzero positive integer
         var migrationsDirectory = new DirectoryInfo(migrationsPath);
-        IEnumerable<FileSystemInfo>? subItems = null;
-        if(dirOrNormal == FileAttributes.Directory)
+        IEnumerable<FileSystemInfo>? subItems = [];
+        if (dirOrFile == FilesystemType.Directory)
         {
             subItems = migrationsDirectory.EnumerateDirectories();
         }
-        else if (dirOrNormal == FileAttributes.Normal)
+        else if (dirOrFile == FilesystemType.File)
         {
             subItems = migrationsDirectory.GetFiles();
         }
-        else
-        {
-            throw new ArgumentOutOfRangeException(nameof(dirOrNormal), 
-                $"Only FileAttributes.Directory or FileAttributes.Normal are supported. Received: {dirOrNormal}");
-        }
-        foreach(var subItem in subItems)
+
+        foreach (var subItem in subItems)
         {
             int version;
             var match = startsWithNumber.Match(subItem.Name);
@@ -170,18 +166,17 @@ public class SqliteInit
             {
                 if (Int32.TryParse(match.Groups[1].Value, out version))
                 {
-                    if(sortedMigrations.ContainsKey(version))
+                    if (sortedMigrations.ContainsKey(version))
                     {
                         var existingItem = sortedMigrations[version];
-                        var itemType = dirOrNormal == FileAttributes.Directory ? "folder" : "file";
+                        var itemType = dirOrFile == FilesystemType.Directory ? "folder" : "file";
                         throw new InvalidDataException(
                             $"Duplicate migration ID {version} detected in {migrationsPath}. " +
                             $"Conflicting {itemType}s: '{Path.GetFileName(existingItem)}' and '{subItem.Name}'. " +
                             $"Each migration must have a unique numeric prefix.");
                     }
-                    
+
                     sortedMigrations.Add(version, subItem.FullName);
-                    //TODO log success 
                 }
             }
         }
@@ -189,4 +184,10 @@ public class SqliteInit
         return sortedMigrations;
     }
 
+}
+
+public enum FilesystemType
+{
+    Directory,
+    File
 }

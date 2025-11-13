@@ -319,7 +319,7 @@ public class SqliteInitTests : IClassFixture<InMemoryDatabaseFixture>
         Directory.CreateDirectory(Path.Combine(basePath, "not_a_migration"));
 
         // Act
-        var result = SqliteInit.SqliteInit.IdentifyMigrationsItems(basePath, FileAttributes.Directory);
+        var result = SqliteInit.SqliteInit.IdentifyMigrationsItems(basePath, FilesystemType.Directory);
 
         // Assert
         // Fourth item didn't get picked up 
@@ -347,7 +347,7 @@ public class SqliteInitTests : IClassFixture<InMemoryDatabaseFixture>
         File.WriteAllText(Path.Combine(basePath, "readme.txt"), "");
 
         // Act
-        var result = SqliteInit.SqliteInit.IdentifyMigrationsItems(basePath, FileAttributes.Normal);
+        var result = SqliteInit.SqliteInit.IdentifyMigrationsItems(basePath, FilesystemType.File);
 
         // Assert
         Assert.Equal(3, result.Count);
@@ -370,7 +370,7 @@ public class SqliteInitTests : IClassFixture<InMemoryDatabaseFixture>
 
         // Act & Assert
         var ex = Assert.Throws<InvalidDataException>(() =>
-            SqliteInit.SqliteInit.IdentifyMigrationsItems(basePath, FileAttributes.Directory));
+            SqliteInit.SqliteInit.IdentifyMigrationsItems(basePath, FilesystemType.Directory));
         
         Assert.Contains("Duplicate migration ID 1", ex.Message);
         Assert.Contains("001_first", ex.Message);
@@ -378,23 +378,6 @@ public class SqliteInitTests : IClassFixture<InMemoryDatabaseFixture>
 
         // Cleanup
         Directory.Delete(basePath, true);
-    }
-
-    [Fact]
-    public void IdentifyMigrationsItems_WithInvalidFileAttribute_ThrowsArgumentOutOfRangeException()
-    {
-        // Arrange
-        var basePath = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(basePath);
-
-        // Act & Assert
-        var ex = Assert.Throws<ArgumentOutOfRangeException>(() =>
-            SqliteInit.SqliteInit.IdentifyMigrationsItems(basePath, FileAttributes.ReadOnly));
-        
-        Assert.Contains("Only FileAttributes.Directory or FileAttributes.Normal are supported", ex.Message);
-
-        // Cleanup
-        Directory.Delete(basePath);
     }
 
     [Fact]
@@ -409,7 +392,7 @@ public class SqliteInitTests : IClassFixture<InMemoryDatabaseFixture>
         Directory.CreateDirectory(Path.Combine(basePath, "no_number"));
 
         // Act
-        var result = SqliteInit.SqliteInit.IdentifyMigrationsItems(basePath, FileAttributes.Directory);
+        var result = SqliteInit.SqliteInit.IdentifyMigrationsItems(basePath, FilesystemType.Directory);
 
         // Assert
         Assert.Single(result);
@@ -437,7 +420,7 @@ public class SqliteInitTests : IClassFixture<InMemoryDatabaseFixture>
         File.WriteAllText(Path.Combine(basePath, "002_table2.sql"), 
             "CREATE TABLE TestTable2 (Id INTEGER PRIMARY KEY);");
 
-        var migrations = SqliteInit.SqliteInit.IdentifyMigrationsItems(basePath, FileAttributes.Normal);
+        var migrations = SqliteInit.SqliteInit.IdentifyMigrationsItems(basePath, FilesystemType.File);
 
         // Act
         SqliteInit.SqliteInit.ApplyMigrations(connection, migrations);
@@ -461,7 +444,7 @@ public class SqliteInitTests : IClassFixture<InMemoryDatabaseFixture>
         Directory.CreateDirectory(basePath);
         File.WriteAllText(Path.Combine(basePath, "001_bad.sql"), "THIS IS NOT VALID SQL;");
 
-        var migrations = SqliteInit.SqliteInit.IdentifyMigrationsItems(basePath, FileAttributes.Normal);
+        var migrations = SqliteInit.SqliteInit.IdentifyMigrationsItems(basePath, FilesystemType.File);
 
         // Act & Assert
         var ex = Assert.Throws<InvalidOperationException>(() =>
