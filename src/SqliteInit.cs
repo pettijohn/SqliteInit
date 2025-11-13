@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.IO;
-using System.Linq;
-using System.Runtime.CompilerServices;
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 
 namespace SqliteInit;
@@ -21,18 +15,22 @@ public class SqliteInit
     /// </summary>
     /// <param name="connectionString"></param>
     /// <param name="migrationsPath"></param>
-    public static void Init(string connectionString, string migrationsPath)
+    /// <param name="log">Optional logging callback</param>
+    public static void Init(string connectionString, string migrationsPath, Action<LogLevel, string>? log = null)
     {
         using (var connection = new SqliteConnection(connectionString))
         {
-            Init(connection, migrationsPath);
+            Init(connection, migrationsPath, log);
         }
     }
 
-    public static void Init(SqliteConnection connection, string migrationsPath)
+    public static void Init(SqliteConnection connection, string migrationsPath, Action<LogLevel, string>? log = null)
     {
+        log?.Invoke(LogLevel.Information, $"Starting SqliteInit for migrations path: {migrationsPath}");
+
         if (!Directory.Exists(migrationsPath))
         {
+            log?.Invoke(LogLevel.Error, $"Migrations path not found: {migrationsPath}");
             throw new DirectoryNotFoundException(
                 $"Migrations path not found: {migrationsPath}");
         }
@@ -41,15 +39,18 @@ public class SqliteInit
         try
         {
             migrationsFolders = IdentifyMigrationsItems(migrationsPath, FilesystemType.Directory);
+            log?.Invoke(LogLevel.Debug, $"Found {migrationsFolders.Count} migration folder(s)");
         }
         catch (Exception ex)
         {
+            log?.Invoke(LogLevel.Error, $"Failed to identify migration folders in '{migrationsPath}'. Error: {ex.Message}");
             throw new InvalidOperationException(
                 $"Failed to identify migration folders in '{migrationsPath}'. Error: {ex.Message}", ex);
         }
 
         if (migrationsFolders.Count == 0)
         {
+            log?.Invoke(LogLevel.Information, "No migration folders found. Nothing to apply.");
             // No migrations to apply - this might be intentional, so just return
             return;
         }
@@ -57,19 +58,28 @@ public class SqliteInit
         connection.Open();
         //Check current user version of database
         var currentVersion = CheckUserVersion(connection);
+        log?.Invoke(LogLevel.Information, $"Current database version: {currentVersion}");
 
         foreach (var folder in migrationsFolders)
         {
-            if (currentVersion >= folder.Key) continue;
+            if (currentVersion >= folder.Key)
+            {
+                log?.Invoke(LogLevel.Debug, $"Skipping version {folder.Key} (already applied)");
+                continue;
+            }
+
+            log?.Invoke(LogLevel.Information, $"Applying migration version {folder.Key} from folder: {Path.GetFileName(folder.Value)}");
 
             //Identify & run sorted upgrade scripts
             SortedDictionary<int, string> migrationFiles;
             try
             {
                 migrationFiles = IdentifyMigrationsItems(folder.Value, FilesystemType.File);
+                log?.Invoke(LogLevel.Debug, $"Found {migrationFiles.Count} migration file(s) in version {folder.Key}");
             }
             catch (Exception ex)
             {
+                log?.Invoke(LogLevel.Error, $"Failed to identify migration files in folder '{Path.GetFileName(folder.Value)}' (Version: {folder.Key})");
                 throw new InvalidOperationException(
                     $"Failed to identify migration files in folder '{Path.GetFileName(folder.Value)}' " +
                     $"(Version: {folder.Key}, Path: {folder.Value}). Error: {ex.Message}", ex);
@@ -77,34 +87,41 @@ public class SqliteInit
 
             if (migrationFiles.Count == 0)
             {
+                log?.Invoke(LogLevel.Error, $"Migration folder '{Path.GetFileName(folder.Value)}' (Version: {folder.Key}) contains no migration files");
                 throw new InvalidOperationException(
                     $"Migration folder '{Path.GetFileName(folder.Value)}' (Version: {folder.Key}) " +
                     $"contains no migration files starting with digits. Each version folder must contain at least one numbered migration file.");
             }
 
-            ApplyMigrations(connection, migrationFiles);
+            ApplyMigrations(connection, migrationFiles, log);
 
             //Update user version
             SetUserVersion(connection, folder.Key);
+            log?.Invoke(LogLevel.Information, $"Successfully applied migration version {folder.Key}");
         }
+
+        log?.Invoke(LogLevel.Information, "SqliteInit completed successfully");
     }
 
     /// <summary>
     /// Run a sequence of migration scripts
     /// </summary>
-    public static void ApplyMigrations(SqliteConnection connection, SortedDictionary<int, string> orderedMigrationScripts)
+    public static void ApplyMigrations(SqliteConnection connection, SortedDictionary<int, string> orderedMigrationScripts, Action<LogLevel, string>? log = null)
     {
         foreach (var migrationScriptPath in orderedMigrationScripts)
         {
             try
             {
+                log?.Invoke(LogLevel.Debug, $"Executing migration script: {Path.GetFileName(migrationScriptPath.Value)}");
                 var migrationContents = File.ReadAllText(migrationScriptPath.Value);
                 var cmd = connection.CreateCommand();
                 cmd.CommandText = migrationContents;
                 cmd.ExecuteNonQuery();
+                log?.Invoke(LogLevel.Debug, $"Successfully executed migration script: {Path.GetFileName(migrationScriptPath.Value)}");
             }
             catch (Exception ex)
             {
+                log?.Invoke(LogLevel.Error, $"Failed to apply migration script '{Path.GetFileName(migrationScriptPath.Value)}' (ID: {migrationScriptPath.Key})");
                 throw new InvalidOperationException(
                     $"Failed to apply migration script '{Path.GetFileName(migrationScriptPath.Value)}' " +
                     $"(ID: {migrationScriptPath.Key}, Path: {migrationScriptPath.Value}). " +

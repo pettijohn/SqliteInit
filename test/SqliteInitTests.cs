@@ -459,6 +459,197 @@ public class SqliteInitTests : IClassFixture<InMemoryDatabaseFixture>
 
     #endregion
 
+    #region Logging Tests
+
+    [Fact]
+    public void Init_WithLogging_InvokesLogCallback()
+    {
+        // Arrange
+        using var connection = new SqliteConnection("DataSource=:memory:");
+        connection.Open();
+        var migrationsPath = CreateTestMigrations(new[]
+        {
+            ("010_logging_test", new[] { "001_create_test_table.sql" })
+        });
+
+        var logMessages = new List<(LogLevel level, string message)>();
+        Action<LogLevel, string> log = (level, msg) => logMessages.Add((level, msg));
+
+        // Act
+        SqliteInit.SqliteInit.Init(connection, migrationsPath, log);
+
+        // Assert
+        Assert.NotEmpty(logMessages);
+        Assert.Contains(logMessages, m => m.level == LogLevel.Information && m.message.Contains("Starting SqliteInit"));
+        Assert.Contains(logMessages, m => m.level == LogLevel.Information && m.message.Contains("completed successfully"));
+        Assert.Contains(logMessages, m => m.level == LogLevel.Information && m.message.Contains("Current database version"));
+        Assert.Contains(logMessages, m => m.level == LogLevel.Information && m.message.Contains("Applying migration version 10"));
+
+        // Cleanup
+        Directory.Delete(migrationsPath, true);
+    }
+
+    [Fact]
+    public void Init_WithLogging_LogsDebugMessages()
+    {
+        // Arrange
+        using var connection = new SqliteConnection("DataSource=:memory:");
+        connection.Open();
+        var migrationsPath = CreateTestMigrations(new[]
+        {
+            ("011_debug_test", new[] { "001_script1.sql", "002_script2.sql" })
+        });
+
+        var logMessages = new List<(LogLevel level, string message)>();
+        Action<LogLevel, string> log = (level, msg) => logMessages.Add((level, msg));
+
+        // Act
+        SqliteInit.SqliteInit.Init(connection, migrationsPath, log);
+
+        // Assert
+        var debugMessages = logMessages.Where(m => m.level == LogLevel.Debug).ToList();
+        Assert.NotEmpty(debugMessages);
+        Assert.Contains(debugMessages, m => m.message.Contains("Found") && m.message.Contains("migration folder"));
+        Assert.Contains(debugMessages, m => m.message.Contains("Found") && m.message.Contains("migration file"));
+        Assert.Contains(debugMessages, m => m.message.Contains("Executing migration script"));
+        Assert.Contains(debugMessages, m => m.message.Contains("Successfully executed migration script"));
+
+        // Cleanup
+        Directory.Delete(migrationsPath, true);
+    }
+
+    [Fact]
+    public void Init_WithLogging_LogsErrorsBeforeExceptions()
+    {
+        // Arrange
+        using var connection = new SqliteConnection("DataSource=:memory:");
+        connection.Open();
+        var migrationsPath = Path.Combine(Path.GetTempPath(), $"migrations_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(migrationsPath);
+        var versionFolder = Path.Combine(migrationsPath, "012_error_test");
+        Directory.CreateDirectory(versionFolder);
+        File.WriteAllText(Path.Combine(versionFolder, "001_bad.sql"), "INVALID SQL;");
+
+        var logMessages = new List<(LogLevel level, string message)>();
+        Action<LogLevel, string> log = (level, msg) => logMessages.Add((level, msg));
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() =>
+            SqliteInit.SqliteInit.Init(connection, migrationsPath, log));
+
+        var errorMessages = logMessages.Where(m => m.level == LogLevel.Error).ToList();
+        Assert.NotEmpty(errorMessages);
+        Assert.Contains(errorMessages, m => m.message.Contains("Failed to apply migration script"));
+
+        // Cleanup
+        Directory.Delete(migrationsPath, true);
+    }
+
+    [Fact]
+    public void Init_WithLogging_LogsSkippedVersions()
+    {
+        // Arrange
+        using var connection = new SqliteConnection("DataSource=:memory:");
+        connection.Open();
+        var migrationsPath = CreateTestMigrations(new[]
+        {
+            ("013_skip_test", new[] { "001_create_table.sql" }),
+            ("014_apply_test", new[] { "001_create_table2.sql" })
+        });
+
+        SqliteInit.SqliteInit.SetUserVersion(connection, 13);
+
+        var logMessages = new List<(LogLevel level, string message)>();
+        Action<LogLevel, string> log = (level, msg) => logMessages.Add((level, msg));
+
+        // Act
+        SqliteInit.SqliteInit.Init(connection, migrationsPath, log);
+
+        // Assert
+        Assert.Contains(logMessages, m => m.level == LogLevel.Debug && m.message.Contains("Skipping version 13"));
+        Assert.Contains(logMessages, m => m.level == LogLevel.Information && m.message.Contains("Applying migration version 14"));
+
+        // Cleanup
+        Directory.Delete(migrationsPath, true);
+    }
+
+    [Fact]
+    public void Init_WithLogging_LogsWhenNoMigrationsFound()
+    {
+        // Arrange
+        using var connection = new SqliteConnection("DataSource=:memory:");
+        connection.Open();
+        var emptyPath = Path.Combine(Path.GetTempPath(), $"empty_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(emptyPath);
+
+        var logMessages = new List<(LogLevel level, string message)>();
+        Action<LogLevel, string> log = (level, msg) => logMessages.Add((level, msg));
+
+        // Act
+        SqliteInit.SqliteInit.Init(connection, emptyPath, log);
+
+        // Assert
+        Assert.Contains(logMessages, m => m.level == LogLevel.Information && m.message.Contains("No migration folders found"));
+
+        // Cleanup
+        Directory.Delete(emptyPath);
+    }
+
+    [Fact]
+    public void Init_WithoutLogging_DoesNotThrowNullReferenceException()
+    {
+        // Arrange
+        using var connection = new SqliteConnection("DataSource=:memory:");
+        connection.Open();
+        var migrationsPath = CreateTestMigrations(new[]
+        {
+            ("015_no_logging", new[] { "001_create_table.sql" })
+        });
+
+        // Act - should not throw
+        SqliteInit.SqliteInit.Init(connection, migrationsPath, null);
+
+        // Assert
+        var version = SqliteInit.SqliteInit.CheckUserVersion(connection);
+        Assert.Equal(15, version);
+
+        // Cleanup
+        Directory.Delete(migrationsPath, true);
+    }
+
+    [Fact]
+    public void ApplyMigrations_WithLogging_LogsEachScript()
+    {
+        // Arrange
+        using var connection = new SqliteConnection("DataSource=:memory:");
+        connection.Open();
+        
+        var basePath = Path.Combine(Path.GetTempPath(), $"test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(basePath);
+        File.WriteAllText(Path.Combine(basePath, "001_table1.sql"), 
+            "CREATE TABLE LogTest1 (Id INTEGER PRIMARY KEY);");
+        File.WriteAllText(Path.Combine(basePath, "002_table2.sql"), 
+            "CREATE TABLE LogTest2 (Id INTEGER PRIMARY KEY);");
+
+        var migrations = SqliteInit.SqliteInit.IdentifyMigrationsItems(basePath, FilesystemType.File);
+        var logMessages = new List<(LogLevel level, string message)>();
+        Action<LogLevel, string> log = (level, msg) => logMessages.Add((level, msg));
+
+        // Act
+        SqliteInit.SqliteInit.ApplyMigrations(connection, migrations, log);
+
+        // Assert
+        Assert.Contains(logMessages, m => m.level == LogLevel.Debug && m.message.Contains("Executing migration script: 001_table1.sql"));
+        Assert.Contains(logMessages, m => m.level == LogLevel.Debug && m.message.Contains("Successfully executed migration script: 001_table1.sql"));
+        Assert.Contains(logMessages, m => m.level == LogLevel.Debug && m.message.Contains("Executing migration script: 002_table2.sql"));
+        Assert.Contains(logMessages, m => m.level == LogLevel.Debug && m.message.Contains("Successfully executed migration script: 002_table2.sql"));
+
+        // Cleanup
+        Directory.Delete(basePath, true);
+    }
+
+    #endregion
+
     #region Helper Methods
 
     /// <summary>
@@ -560,7 +751,7 @@ public class SqliteInitTests : IClassFixture<InMemoryDatabaseFixture>
                     PaymentMethod TEXT NOT NULL
                 );",
             _ => $@"
-                CREATE TABLE {tableName} (
+                CREATE TABLE [{tableName}] (
                     Id INTEGER PRIMARY KEY AUTOINCREMENT,
                     Name TEXT NOT NULL
                 );"
