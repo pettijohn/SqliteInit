@@ -9,7 +9,7 @@ Files within that folder that start with numbers will be executed as SQL sequent
 Folders/Files that do not start with numbers will be skipped. In other words, we only include it if it starts with `^\d+`
 
 
-In your app startup code, call `SqliteInit.Init()`, passing in the connection string and path to your migrations code. After applying migrations, it will automatically update `PRAGMA user_version` to match the number of the folder. Future migrations check the version number against the migrations folder numbers and upgade if required. 
+In your app startup code, call `SqliteInit.Init()`, passing in the connection or connection string and path to your migrations code. After applying migrations, it will automatically update `PRAGMA user_version` to match the number of the folder. Future migrations check the version number against the migrations folder numbers and upgade if required. 
 
 Example:
 
